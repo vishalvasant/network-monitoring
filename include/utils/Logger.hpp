@@ -7,19 +7,9 @@
 #include <chrono>
 #include <sstream>
 #include <iomanip>
-#include <filesystem>
-#include <vector>
-#include <algorithm>
 
 class Logger {
 public:
-    struct Config {
-        std::string log_file = "network_monitor.log";
-        Level level = Level::INFO;
-        size_t max_file_size = 10 * 1024 * 1024; // 10MB default
-        int max_backup_files = 5; // Keep 5 backup files by default
-    };
-
     enum class Level {
         DEBUG,
         INFO,
@@ -29,8 +19,6 @@ public:
     };
 
     static void init(const std::string& log_file = "network_monitor.log", Level level = Level::INFO);
-    static void init(const Config& config);
-    static Config& getConfig();
     static void setLevel(Level level);
     static void debug(const std::string& message);
     static void info(const std::string& message);
@@ -47,11 +35,4 @@ private:
     static Level current_level_;
     static std::mutex mutex_;
     static bool initialized_;
-    static Config config_;
-
-    // Log rotation methods
-    static void rotateLogIfNeeded();
-    static void rotateLog();
-    static std::string getBackupFilename(int index);
-    static void removeOldBackups();
-};
+}; 
