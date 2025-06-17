@@ -1,24 +1,25 @@
 #include "utils/Logger.hpp"
 #include <iostream>
 #include <ctime>
+#include <filesystem>
 
 std::unique_ptr<std::ofstream> Logger::log_file_;
 Logger::Level Logger::current_level_ = Logger::Level::INFO;
 std::mutex Logger::mutex_;
 bool Logger::initialized_ = false;
+Logger::Config Logger::config_;
 
-void Logger::init(const std::string& log_file, Level level) {
+void Logger::init(const Config& config) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (initialized_) {
         return;
     }
-
-    log_file_ = std::make_unique<std::ofstream>(log_file, std::ios::app);
+    config_ = config;
+    log_file_ = std::make_unique<std::ofstream>(config_.log_file, std::ios::app);
     if (!log_file_->is_open()) {
-        throw std::runtime_error("Failed to open log file: " + log_file);
+        throw std::runtime_error("Failed to open log file: " + config_.log_file);
     }
-
-    current_level_ = level;
+    current_level_ = config_.level;
     initialized_ = true;
     info("Logger initialized");
 }
@@ -53,24 +54,61 @@ void Logger::log(Level level, const std::string& message) {
         std::cerr << "Logger not initialized" << std::endl;
         return;
     }
-
     if (level < current_level_) {
         return;
     }
-
     std::lock_guard<std::mutex> lock(mutex_);
+    rotateIfNeeded();
     std::string timestamp = getTimestamp();
     std::string level_str = levelToString(level);
-    
     std::string log_message = timestamp + " [" + level_str + "] " + message + "\n";
-    
     *log_file_ << log_message;
     log_file_->flush();
-
-    // Also output to console for ERROR and FATAL levels
     if (level >= Level::ERROR) {
         std::cerr << log_message;
     }
+}
+
+void Logger::rotateIfNeeded() {
+    if (!log_file_) return;
+    log_file_->flush();
+    size_t file_size = getCurrentFileSize();
+    if (file_size < config_.max_file_size) return;
+    log_file_->close();
+    rotateLogs();
+    log_file_ = std::make_unique<std::ofstream>(config_.log_file, std::ios::trunc);
+}
+
+void Logger::rotateLogs() {
+    namespace fs = std::filesystem;
+    // Delete the oldest backup if max reached
+    std::string oldest = getBackupFileName(config_.max_backup_files);
+    if (fs::exists(oldest)) {
+        fs::remove(oldest);
+    }
+    // Shift backups
+    for (size_t i = config_.max_backup_files; i > 0; --i) {
+        std::string src = getBackupFileName(i - 1);
+        std::string dst = getBackupFileName(i);
+        if (fs::exists(src)) {
+            fs::rename(src, dst);
+        }
+    }
+    // Rename current log to .1
+    if (fs::exists(config_.log_file)) {
+        fs::rename(config_.log_file, getBackupFileName(1));
+    }
+}
+
+size_t Logger::getCurrentFileSize() {
+    namespace fs = std::filesystem;
+    if (!fs::exists(config_.log_file)) return 0;
+    return fs::file_size(config_.log_file);
+}
+
+std::string Logger::getBackupFileName(size_t index) {
+    if (index == 0) return config_.log_file;
+    return config_.log_file + "." + std::to_string(index);
 }
 
 std::string Logger::levelToString(Level level) {
